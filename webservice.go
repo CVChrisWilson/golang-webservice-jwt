@@ -121,7 +121,7 @@ func main() {
         v1 := r.Group("api/v1")
         v1.Use(authMiddleware.MiddlewareFunc())
         {
-        		v1.GET("/auth/refresh_token", authMiddleware.RefreshHandler)
+       		v1.GET("/auth/refresh_token", authMiddleware.RefreshHandler)
                 v1.GET("/blogs", cache.CachePage(store, time.Minute, GetBlogs))
                 v1.GET("/blogs/:id", cache.CachePage(store, time.Minute, GetBlog))
                 v1.POST("/blogs", PostBlog)
