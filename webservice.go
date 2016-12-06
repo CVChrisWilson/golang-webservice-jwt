@@ -6,9 +6,9 @@ import (
         "log"
         "strconv"
 		"gopkg.in/appleboy/gin-jwt.v2"
+		"os"
 		"time"
         "github.com/gin-gonic/gin"
-        "github.com/gin-gonic/contrib/cache"
         _ "github.com/go-sql-driver/mysql"
         gorp "gopkg.in/gorp.v2"
 )
@@ -75,9 +75,6 @@ func main() {
         r.Use(gin.Recovery())
         r.Use(Cors())
 
-        // the gin-gonic cache
-        store := cache.NewInMemoryStore(time.Second)
-
         // the jwt middleware
 		authMiddleware := &jwt.GinJWTMiddleware{
 			Realm:      "test zone",
@@ -122,22 +119,22 @@ func main() {
         v1.Use(authMiddleware.MiddlewareFunc())
         {
         		v1.GET("/auth/refresh_token", authMiddleware.RefreshHandler)
-                v1.GET("/blogs", cache.CachePage(store, time.Minute, GetBlogs))
-                v1.GET("/blogs/:id", cache.CachePage(store, time.Minute, GetBlog))
+                v1.GET("/blogs", GetBlogs)
+                v1.GET("/blogs/:id", GetBlog)
                 v1.POST("/blogs", PostBlog)
-                v1.PUT("/blogs/:id", cache.CachePage(store, time.Minute, UpdateBlog))
+                v1.PUT("/blogs/:id", UpdateBlog)
                 v1.DELETE("/blogs/:id", DeleteBlog)
-                v1.OPTIONS("/blogs", cache.CachePage(store, time.Minute, OptionsBlog))     // POST
-                v1.OPTIONS("/blogs/:id", cache.CachePage(store, time.Minute, OptionsBlog)) // PUT, DELETE
-                v1.GET("/portfolios", cache.CachePage(store, time.Minute, GetPortfolios))
-                v1.GET("/portfolios/:id", cache.CachePage(store, time.Minute, GetPortfolio))
+                v1.OPTIONS("/blogs", OptionsBlog)     // POST
+                v1.OPTIONS("/blogs/:id", OptionsBlog) // PUT, DELETE
+                v1.GET("/portfolios", GetPortfolios)
+                v1.GET("/portfolios/:id", GetPortfolio)
                 v1.POST("/portfolios", PostPortfolio)
                 v1.PUT("/portfolios/:id", UpdatePortfolio)
                 v1.DELETE("/portfolios/:id", DeletePortfolio)
-                v1.OPTIONS("/portfolios", cache.CachePage(store, time.Minute, OptionsPortfolio))     // POST
-                v1.OPTIONS("/portfolios/:id", cache.CachePage(store, time.Minute, OptionsPortfolio)) // PUT, DELETE
-                v1.GET("/latest/portfolios/:count/:offset", cache.CachePage(store, time.Minute, GetPortfolioSet))
-                v1.GET("/latest/blogs/:count/:offset", cache.CachePage(store, time.Minute, GetBlogSet))
+                v1.OPTIONS("/portfolios", OptionsPortfolio)     // POST
+                v1.OPTIONS("/portfolios/:id", OptionsPortfolio) // PUT, DELETE
+                v1.GET("/latest/portfolios/:count/:offset", GetPortfolioSet)
+                v1.GET("/latest/blogs/:count/:offset", GetBlogSet)
         }
 
         r.Run(":8080")
