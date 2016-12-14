@@ -3,10 +3,11 @@ package main
 import (
         "database/sql"
         "fmt"
+        "strings"
         "log"
         "strconv"
-		"gopkg.in/appleboy/gin-jwt.v2"
-		"time"
+                "gopkg.in/appleboy/gin-jwt.v2"
+                "time"
         "github.com/gin-gonic/gin"
         "github.com/gin-gonic/contrib/cache"
         _ "github.com/go-sql-driver/mysql"
@@ -15,19 +16,20 @@ import (
 
 type Blog struct {
         Id           int64  `db:"id" json:"id"`
-        Created_time string `db:"createdtime" json:"createdtime"`
-        Updated_time string `db:"updatedtime" json:"updatedtime"`
+        Created_time int64 `db:"createdtime" json:"createdtime"`
+        Updated_time int64 `db:"updatedtime" json:"updatedtime"`
         Created_by   string `db:"createdby" json:"createdby"`
         Updated_by   string `db:"updatedby" json:"updatedby"`
         Title        string `db:"title" json:"title"`
+        Description  string `db:"description" json:"description"`
         Text_html    string `db:"texthtml" json:"texthtml"`
         Author       string `db:"author" json:"author"`
 }
 
 type Portfolio struct {
         Id           int64  `db:"id" json:"id"`
-        Created_time string `db:"createdtime" json:"createdtime"`
-        Updated_time string `db:"updatedtime" json:"updatedtime"`
+        Created_time int64 `db:"createdtime" json:"createdtime"`
+        Updated_time int64 `db:"updatedtime" json:"updatedtime"`
         Created_by   string `db:"createdby" json:"createdby"`
         Updated_by   string `db:"updatedby" json:"updatedby"`
         Name         string `db:"name" json:"name"`
@@ -79,49 +81,49 @@ func main() {
         store := cache.NewInMemoryStore(time.Second)
 
         // the jwt middleware
-		authMiddleware := &jwt.GinJWTMiddleware{
-			Realm:      "test zone",
-			Key:        []byte("secret key"),
-			Timeout:    time.Hour,
-			MaxRefresh: time.Hour,
-			Authenticator: func(userId string, password string, c *gin.Context) (string, bool) {
-				if (userId == "admin" && password == "admin") || (userId == "test" && password == "test") {
-					return userId, true
-				}
+                authMiddleware := &jwt.GinJWTMiddleware{
+                        Realm:      "test zone",
+                        Key:        []byte("secret key"),
+                        Timeout:    time.Hour,
+                        MaxRefresh: time.Hour,
+                        Authenticator: func(userId string, password string, c *gin.Context) (string, bool) {
+                                if (userId == "admin" && password == "admin") || (userId == "test" && password == "test") {
+                                        return userId, true
+                                }
 
-				return userId, false
-			},
-			Authorizator: func(userId string, c *gin.Context) bool {
-				if userId == "admin" {
-					return true
-				}
+                                return userId, false
+                        },
+                        Authorizator: func(userId string, c *gin.Context) bool {
+                                if userId == "admin" {
+                                        return true
+                                }
 
-				return false
-			},
-			Unauthorized: func(c *gin.Context, code int, message string) {
-				c.JSON(code, gin.H{
-					"code":    code,
-					"message": message,
-				})
-			},
-			// TokenLookup is a string in the form of "<source>:<name>" that is used
-			// to extract token from the request.
-			// Optional. Default value "header:Authorization".
-			// Possible values:
-			// - "header:<name>"
-			// - "query:<name>"
-			// - "cookie:<name>"
-			TokenLookup: "header:Authorization",
-			// TokenLookup: "query:token",
-			// TokenLookup: "cookie:token",
-		}
-		
-		r.POST("api/login", authMiddleware.LoginHandler)
+                                return false
+                        },
+                        Unauthorized: func(c *gin.Context, code int, message string) {
+                                c.JSON(code, gin.H{
+                                        "code":    code,
+                                        "message": message,
+                                })
+                        },
+                        // TokenLookup is a string in the form of "<source>:<name>" that is used
+                        // to extract token from the request.
+                        // Optional. Default value "header:Authorization".
+                        // Possible values:
+                        // - "header:<name>"
+                        // - "query:<name>"
+                        // - "cookie:<name>"
+                        TokenLookup: "header:Authorization",
+                        // TokenLookup: "query:token",
+                        // TokenLookup: "cookie:token",
+                }
 
+                r.POST("api/login", authMiddleware.LoginHandler)
+                
         v1 := r.Group("api/v1")
         v1.Use(authMiddleware.MiddlewareFunc())
         {
-       		v1.GET("/auth/refresh_token", authMiddleware.RefreshHandler)
+                v1.GET("/auth/refresh_token", authMiddleware.RefreshHandler)
                 v1.GET("/blogs", cache.CachePage(store, time.Minute, GetBlogs))
                 v1.GET("/blogs/:id", cache.CachePage(store, time.Minute, GetBlog))
                 v1.POST("/blogs", PostBlog)
@@ -138,9 +140,41 @@ func main() {
                 v1.OPTIONS("/portfolios/:id", cache.CachePage(store, time.Minute, OptionsPortfolio)) // PUT, DELETE
                 v1.GET("/latest/portfolios/:count/:offset", cache.CachePage(store, time.Minute, GetPortfolioSet))
                 v1.GET("/latest/blogs/:count/:offset", cache.CachePage(store, time.Minute, GetBlogSet))
+                v1.GET("/search/blogs/:searchstring", SearchBlogs)
         }
 
         r.Run(":8080")
+}
+
+func SearchBlogs(c *gin.Context) {
+        searchString := c.Params.ByName("searchstring")
+        searchString = MysqlRealEscapeString(searchString)
+        searchTerms := strings.Split(searchString, "+")
+
+        var blogs []Blog
+
+        searchQuery := "SELECT id, createdtime, updatedtime, createdby, updatedby, title, description, texthtml, author FROM (SELECT b.*, ("
+        for idx := range searchTerms {
+                if idx == 0 {
+                        searchQuery += "(title LIKE '%" + searchTerms[idx] + "%') + (texthtml LIKE '%" + searchTerms[idx] + "%') +"
+                }
+                searchQuery += "(title LIKE '%" + searchTerms[idx] + "%') + (texthtml LIKE '%" + searchTerms[idx] + "%')"
+        }
+        searchQuery += ") as hits FROM Blog b HAVING hits > 0 ORDER BY hits DESC) as Blog"
+        fmt.Println(searchQuery)
+        //searchQuery := "SELECT id, createdtime, updatedtime, createdby, updatedby, title, description, texthtml, author FROM (SELECT b.*, ((title LIKE '%?%') + (texthtml LIKE '%?%')" + strings.Repeat(" + (title LIKE '%?%') + (htmltext LIKE '%?%')", len(searchTerms)-1) + ") as hits FROM Blog b HAVING hits > 0 ORDER BY hits DESC) as Blog"
+        /*fmt.Println(searchQuery)
+        args := make([]interface{}, len(searchTerms))
+        for idx, val := range searchTerms { args[idx] = val }
+        _, err := dbmap.Select(&blogs, searchQuery, args...)*/
+        _, err := dbmap.Select(&blogs, searchQuery)
+
+        if err == nil {
+                c.JSON(200, blogs)
+        } else {
+                c.JSON(404, gin.H{"error": "no blogs found"})
+                fmt.Println(err)
+        }
 }
 
 func GetBlogs(c *gin.Context) {
@@ -158,26 +192,32 @@ func GetBlogs(c *gin.Context) {
 
 func GetBlog(c *gin.Context) {
         id := c.Params.ByName("id")
-        var blog Blog
-        err := dbmap.SelectOne(&blog, "SELECT * FROM Blog WHERE id=? LIMIT 1", id)
-
-        if err == nil {
-                blog_id, _ := strconv.ParseInt(id, 0, 64)
-
-                content := &Blog{
-                        Id:           blog_id,
-                        Created_time: blog.Created_time,
-                        Updated_time: blog.Updated_time,
-                        Created_by:   blog.Created_by,
-                        Updated_by:   blog.Updated_by,
-                        Title:        blog.Title,
-                        Text_html:    blog.Text_html,
-                        Author:       blog.Author,
+        if _, err := strconv.Atoi(id); err == nil {
+                var blog Blog
+                err := dbmap.SelectOne(&blog, "SELECT * FROM Blog WHERE id=? LIMIT 1", id)
+        
+                if err == nil {
+                        blog_id, _ := strconv.ParseInt(id, 0, 64)
+        
+                        content := &Blog{
+                                Id:           blog_id,
+                                Created_time: blog.Created_time,
+                                Updated_time: blog.Updated_time,
+                                Created_by:   blog.Created_by,
+                                Updated_by:   blog.Updated_by,
+                                Title:        blog.Title,
+                                Text_html:    blog.Text_html,
+                                Description:  blog.Description,
+                                Author:       blog.Author,
+                        }
+                        c.JSON(200, content)
+                } else {
+                        fmt.Println(err)
+                        c.JSON(404, gin.H{"error": "blog not found"})
                 }
-                c.JSON(200, content)
         } else {
                 fmt.Println(err)
-                c.JSON(404, gin.H{"error": "blog not found"})
+                c.JSON(405, gin.H{"error": "operation not allowed"})
         }
 
         // curl -i http://localhost:8080/api/v1/blogs/1
@@ -206,19 +246,20 @@ func PostBlog(c *gin.Context) {
 
         log.Println(blog.Title)
 
-        if blog.Created_by != "" && blog.Title != "" && blog.Text_html != "" && blog.Updated_by != "" && blog.Author != "" {
+        if blog.Created_by != "" && blog.Title != "" && blog.Text_html != "" && blog.Updated_by != "" && blog.Author != "" && blog.Description != "" {
 
-                if insert, _ := dbmap.Exec(`INSERT INTO Blog (createdby, updatedby, title, texthtml, author) VALUES (?, ?, ?, ?, ?)`, blog.Created_by, blog.Updated_by, blog.Title, blog.Text_html, blog.Author); insert != nil {
+                if insert, _ := dbmap.Exec(`INSERT INTO Blog (createdby, updatedby, title, texthtml, author) VALUES (?, ?, ?, ?, ?, ?)`, blog.Created_by, blog.Updated_by, blog.Title, blog.Text_html, blog.Author, blog.Description); insert != nil {
                         blog_id, err := insert.LastInsertId()
                         if err == nil {
                                 content := &Blog{
                                         Id:           blog_id,
-                                        Created_time: blog.Created_time,
-                                        Updated_time: blog.Updated_time,
+                                        Created_time: time.Now().UTC().UnixNano(),
+                                        Updated_time: time.Now().UTC().UnixNano(),
                                         Created_by:   blog.Created_by,
                                         Updated_by:   blog.Updated_by,
                                         Title:        blog.Title,
                                         Text_html:    blog.Text_html,
+                                        Description:  blog.Description,
                                         Author:       blog.Author,
                                 }
                                 c.JSON(201, content)
@@ -238,55 +279,59 @@ func PostBlog(c *gin.Context) {
 
 func UpdateBlog(c *gin.Context) {
         id := c.Params.ByName("id")
-        var blog Blog
-        err := dbmap.SelectOne(&blog, "SELECT * FROM Blog WHERE id=?", id)
-
-        if err == nil {
-                var json Blog
-                c.Bind(&json)
-
-                blog_id, _ := strconv.ParseInt(id, 0, 64)
-
-                blog := Blog{
-                        Id:           blog_id,
-                        Created_time: json.Created_time,
-                        Updated_time: json.Updated_time,
-                        Created_by:   json.Created_by,
-                        Updated_by:   json.Updated_by,
-                        Title:        json.Title,
-                        Text_html:    json.Text_html,
-                        Author:       json.Author,
-                }
-
-                if blog.Created_by == "" {
-                        blog.Created_by = "Anonymous"
-                }
-
-                if blog.Updated_by == "" {
-                        blog.Updated_by = blog.Created_by
-                }
-
-                if blog.Author == "" {
-                        blog.Author = blog.Created_by
-                }
-
-                if blog.Created_by != "" && blog.Updated_by != "" && blog.Title != "" && blog.Text_html != "" {
-                        _, err = dbmap.Update(&blog)
-
-                        if err == nil {
-                                c.JSON(200, blog)
-                        } else {
-                                checkErr(err, "Updated failed")
+        if _, err := strconv.Atoi(id); err == nil {
+                var blog Blog
+                err := dbmap.SelectOne(&blog, "SELECT * FROM Blog WHERE id=?", id)
+        
+                if err == nil {
+                        var json Blog
+                        c.Bind(&json)
+        
+                        blog_id, _ := strconv.ParseInt(id, 0, 64)
+        
+                        blog := Blog{
+                                Id:           blog_id,
+                                Created_time: json.Created_time,
+                                Updated_time: time.Now().UTC().UnixNano(),
+                                Created_by:   json.Created_by,
+                                Updated_by:   json.Updated_by,
+                                Title:        json.Title,
+                                Text_html:    json.Text_html,
+                                Description:  json.Description,
+                                Author:       json.Author,
                         }
-
+        
+                        if blog.Created_by == "" {
+                                blog.Created_by = "Anonymous"
+                        }
+        
+                        if blog.Updated_by == "" {
+                                blog.Updated_by = blog.Created_by
+                        }
+        
+                        if blog.Author == "" {
+                                blog.Author = blog.Created_by
+                        }
+        
+                        if blog.Created_by != "" && blog.Updated_by != "" && blog.Title != "" && blog.Text_html != "" && blog.Description != "" {
+                                _, err = dbmap.Update(&blog)
+        
+                                if err == nil {
+                                        c.JSON(200, blog)
+                                } else {
+                                        checkErr(err, "Updated failed")
+                                }
+        
+                        } else {
+                                c.JSON(400, gin.H{"error": "fields are empty"})
+                        }
+        
                 } else {
-                        c.JSON(400, gin.H{"error": "fields are empty"})
+                        c.JSON(404, gin.H{"error": "blog not found"})
                 }
-
         } else {
-                c.JSON(404, gin.H{"error": "blog not found"})
+                c.JSON(405, gin.H{"error": "operation not allowed"})
         }
-
         // curl -i -X PUT -H "Content-Type: application/json" -d "{ \"firstname\": \"Thea\", \"lastname\": \"Merlyn\" }" http://localhost:8080/api/v1/users/1
 }
 
@@ -294,19 +339,23 @@ func DeleteBlog(c *gin.Context) {
         id := c.Params.ByName("id")
 
         var blog Blog
-        err := dbmap.SelectOne(&blog, "SELECT * FROM Blog WHERE id=?", id)
-
-        if err == nil {
-                _, err = dbmap.Delete(&blog)
-
+        if _, err := strconv.Atoi(id); err == nil {
+                err := dbmap.SelectOne(&blog, "SELECT * FROM Blog WHERE id=?", id)
+        
                 if err == nil {
-                        c.JSON(200, gin.H{"id #" + id: "deleted"})
+                        _, err = dbmap.Delete(&blog)
+        
+                        if err == nil {
+                                c.JSON(200, gin.H{"id #" + id: "deleted"})
+                        } else {
+                                checkErr(err, "Delete failed")
+                        }
+        
                 } else {
-                        checkErr(err, "Delete failed")
+                        c.JSON(404, gin.H{"error": "blog not found"})
                 }
-
         } else {
-                c.JSON(404, gin.H{"error": "blog not found"})
+                c.JSON(405, gin.H{"error": "operation not allowed"})
         }
 
         // curl -i -X DELETE http://localhost:8080/api/v1/users/1
@@ -355,28 +404,32 @@ func GetBlogSet(c *gin.Context) {
 
 func GetPortfolio(c *gin.Context) {
         id := c.Params.ByName("id")
-        var portfolio Portfolio
-        err := dbmap.SelectOne(&portfolio, "SELECT * FROM Portfolio WHERE id=? LIMIT 1", id)
-
-        if err == nil {
-                portfolio_id, _ := strconv.ParseInt(id, 0, 64)
-
-                content := &Portfolio{
-                        Id:           portfolio_id,
-                        Created_time: portfolio.Created_time,
-                        Updated_time: portfolio.Updated_time,
-                        Created_by:   portfolio.Created_by,
-                        Updated_by:   portfolio.Updated_by,
-                        Name:         portfolio.Name,
-                        Description:  portfolio.Description,
-                        Text_html:    portfolio.Text_html,
-                        Demo_url:     portfolio.Demo_url,
-                        Author:       portfolio.Author,
+        if _, err := strconv.Atoi(id); err == nil {
+                var portfolio Portfolio
+                err := dbmap.SelectOne(&portfolio, "SELECT * FROM Portfolio WHERE id=? LIMIT 1", id)
+        
+                if err == nil {
+                        portfolio_id, _ := strconv.ParseInt(id, 0, 64)
+        
+                        content := &Portfolio{
+                                Id:           portfolio_id,
+                                Created_time: portfolio.Created_time,
+                                Updated_time: portfolio.Updated_time,
+                                Created_by:   portfolio.Created_by,
+                                Updated_by:   portfolio.Updated_by,
+                                Name:         portfolio.Name,
+                                Description:  portfolio.Description,
+                                Text_html:    portfolio.Text_html,
+                                Demo_url:     portfolio.Demo_url,
+                                Author:       portfolio.Author,
+                        }
+                        c.JSON(200, content)
+                } else {
+                        fmt.Println(err)
+                        c.JSON(404, gin.H{"error": "portfolio not found"})
                 }
-                c.JSON(200, content)
         } else {
-                fmt.Println(err)
-                c.JSON(404, gin.H{"error": "portfolio not found"})
+                c.JSON(405, gin.H{"error": "operation not allowed"})
         }
 
         // curl -i http://localhost:8080/api/v1/portfolios/1
@@ -410,8 +463,8 @@ func PostPortfolio(c *gin.Context) {
                         if err == nil {
                                 content := &Portfolio{
                                         Id:           portfolio_id,
-                                        Created_time: portfolio.Created_time,
-                                        Updated_time: portfolio.Updated_time,
+                                        Created_time: time.Now().UTC().UnixNano(),
+                                        Updated_time: time.Now().UTC().UnixNano(),
                                         Created_by:   portfolio.Created_by,
                                         Updated_by:   portfolio.Updated_by,
                                         Name:         portfolio.Name,
@@ -437,55 +490,59 @@ func PostPortfolio(c *gin.Context) {
 
 func UpdatePortfolio(c *gin.Context) {
         id := c.Params.ByName("id")
-        var portfolio Portfolio
-        err := dbmap.SelectOne(&portfolio, "SELECT * FROM Portfolio WHERE id=?", id)
-
-        if err == nil {
-                var json Portfolio
-                c.Bind(&json)
-
-                portfolio_id, _ := strconv.ParseInt(id, 0, 64)
-
-                portfolio := Portfolio{
-                        Id:           portfolio_id,
-                        Created_time: json.Created_time,
-                        Updated_time: json.Updated_time,
-                        Created_by:   json.Created_by,
-                        Updated_by:   json.Updated_by,
-                        Name:         json.Name,
-                        Description:  json.Description,
-                        Text_html:    json.Text_html,
-                        Demo_url:     json.Demo_url,
-                        Author:       json.Author,
-                }
-
-                if portfolio.Created_by == "" {
-                        portfolio.Created_by = "Anonymous"
-                }
-
-                if portfolio.Updated_by == "" {
-                        portfolio.Updated_by = portfolio.Created_by
-                }
-
-                if portfolio.Author == "" {
-                        portfolio.Author = portfolio.Created_by
-                }
-
-                if portfolio.Created_by != "" && portfolio.Updated_by != "" && portfolio.Name != "" && portfolio.Text_html != "" {
-                        _, err = dbmap.Update(&portfolio)
-
-                        if err == nil {
-                                c.JSON(200, portfolio)
-                        } else {
-                                checkErr(err, "Updated failed")
+        if _, err := strconv.Atoi(id); err == nil {
+                var portfolio Portfolio
+                err := dbmap.SelectOne(&portfolio, "SELECT * FROM Portfolio WHERE id=?", id)
+        
+                if err == nil {
+                        var json Portfolio
+                        c.Bind(&json)
+        
+                        portfolio_id, _ := strconv.ParseInt(id, 0, 64)
+        
+                        portfolio := Portfolio{
+                                Id:           portfolio_id,
+                                Created_time: json.Created_time,
+                                Updated_time: time.Now().UTC().UnixNano(),
+                                Created_by:   json.Created_by,
+                                Updated_by:   json.Updated_by,
+                                Name:         json.Name,
+                                Description:  json.Description,
+                                Text_html:    json.Text_html,
+                                Demo_url:     json.Demo_url,
+                                Author:       json.Author,
                         }
-
+        
+                        if portfolio.Created_by == "" {
+                                portfolio.Created_by = "Anonymous"
+                        }
+        
+                        if portfolio.Updated_by == "" {
+                                portfolio.Updated_by = portfolio.Created_by
+                        }
+        
+                        if portfolio.Author == "" {
+                                portfolio.Author = portfolio.Created_by
+                        }
+        
+                        if portfolio.Created_by != "" && portfolio.Updated_by != "" && portfolio.Name != "" && portfolio.Text_html != "" {
+                                _, err = dbmap.Update(&portfolio)
+        
+                                if err == nil {
+                                        c.JSON(200, portfolio)
+                                } else {
+                                        checkErr(err, "Updated failed")
+                                }
+        
+                        } else {
+                                c.JSON(400, gin.H{"error": "fields are empty"})
+                        }
+        
                 } else {
-                        c.JSON(400, gin.H{"error": "fields are empty"})
+                        c.JSON(404, gin.H{"error": "portfolio not found"})
                 }
-
         } else {
-                c.JSON(404, gin.H{"error": "portfolio not found"})
+                c.JSON(405, gin.H{"error": "operation not allowed"})
         }
 
         // curl -i -X PUT -H "Content-Type: application/json" -d "{ \"firstname\": \"Thea\", \"lastname\": \"Merlyn\" }" http://localhost:8080/api/v1/users/1
@@ -493,23 +550,25 @@ func UpdatePortfolio(c *gin.Context) {
 
 func DeletePortfolio(c *gin.Context) {
         id := c.Params.ByName("id")
-
-        var portfolio Portfolio
-        err := dbmap.SelectOne(&portfolio, "SELECT * FROM Portfolio WHERE id=?", id)
-
-        if err == nil {
-                _, err = dbmap.Delete(&portfolio)
-
+        if _, err := strconv.Atoi(id); err == nil {
+                var portfolio Portfolio
+                err := dbmap.SelectOne(&portfolio, "SELECT * FROM Portfolio WHERE id=?", id)
+        
                 if err == nil {
-                        c.JSON(200, gin.H{"id #" + id: "deleted"})
+                        _, err = dbmap.Delete(&portfolio)
+        
+                        if err == nil {
+                                c.JSON(200, gin.H{"id #" + id: "deleted"})
+                        } else {
+                                checkErr(err, "Delete failed")
+                        }
+        
                 } else {
-                        checkErr(err, "Delete failed")
+                        c.JSON(404, gin.H{"error": "portfolio not found"})
                 }
-
         } else {
-                c.JSON(404, gin.H{"error": "portfolio not found"})
+                c.JSON(405, gin.H{"error": "operation not allowed"})
         }
-
         // curl -i -X DELETE http://localhost:8080/api/v1/users/1
 }
 
@@ -525,3 +584,21 @@ func OptionsBlog(c *gin.Context) {
         c.Next()
 }
 
+func stripchars(str, chr string) string {
+    return strings.Map(func(r rune) rune {
+        if strings.IndexRune(chr, r) < 0 {
+            return r
+        }
+        return -1
+    }, str)
+}
+
+func MysqlRealEscapeString(value string) string {
+    replace := map[string]string{"\\":"\\\\", "'":`\'`, "\\0":"\\\\0", "\n":"\\n", "\r":"\\r", `"`:`\"`, "\x1a":"\\Z"}
+
+    for b, a := range replace {
+        value = strings.Replace(value, b, a, -1)
+    }
+
+    return value;
+}
