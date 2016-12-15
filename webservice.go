@@ -140,10 +140,27 @@ func main() {
                 v1.OPTIONS("/portfolios/:id", cache.CachePage(store, time.Minute, OptionsPortfolio)) // PUT, DELETE
                 v1.GET("/latest/portfolios/:count/:offset", cache.CachePage(store, time.Minute, GetPortfolioSet))
                 v1.GET("/latest/blogs/:count/:offset", cache.CachePage(store, time.Minute, GetBlogSet))
-                v1.GET("/search/blogs/:searchstring", SearchBlogs)
+                v1.GET("/search/blogs/:searchstring", cache.CachePage(store, time.Minute, SearchBlogs))
+                v1.GET("/search/author/:searchstring", SearchAuthor)
         }
 
         r.Run(":8080")
+}
+
+func SearchAuthor(c *gin.Context) {
+        searchString := c.Params.ByName("searchstring")
+        searchString = MysqlRealEscapeString(searchString)
+
+        var blogs []Blog
+
+        _, err := dbmap.Select(&blogs, "SELECT * FROM Blog WHERE author=?", searchString)
+
+        if err == nil {
+                c.JSON(200, blogs)
+        } else {
+                c.JSON(404, gin.H{"error": "no blogs found"})
+                fmt.Println(err)
+        }
 }
 
 func SearchBlogs(c *gin.Context) {
@@ -156,17 +173,14 @@ func SearchBlogs(c *gin.Context) {
         searchQuery := "SELECT id, createdtime, updatedtime, createdby, updatedby, title, description, texthtml, author FROM (SELECT b.*, ("
         for idx := range searchTerms {
                 if idx == 0 {
-                        searchQuery += "(title LIKE '%" + searchTerms[idx] + "%') + (texthtml LIKE '%" + searchTerms[idx] + "%') +"
-                }
-                searchQuery += "(title LIKE '%" + searchTerms[idx] + "%') + (texthtml LIKE '%" + searchTerms[idx] + "%')"
+                        searchQuery += "(title LIKE '%" + searchTerms[idx] + "%') + (texthtml LIKE '%" + searchTerms[idx] + "%')"
+                } else {
+                        searchQuery += "+ (title LIKE '%" + searchTerms[idx] + "%') + (texthtml LIKE '%" + searchTerms[idx] + "%')"
+                }       
         }
         searchQuery += ") as hits FROM Blog b HAVING hits > 0 ORDER BY hits DESC) as Blog"
         fmt.Println(searchQuery)
-        //searchQuery := "SELECT id, createdtime, updatedtime, createdby, updatedby, title, description, texthtml, author FROM (SELECT b.*, ((title LIKE '%?%') + (texthtml LIKE '%?%')" + strings.Repeat(" + (title LIKE '%?%') + (htmltext LIKE '%?%')", len(searchTerms)-1) + ") as hits FROM Blog b HAVING hits > 0 ORDER BY hits DESC) as Blog"
-        /*fmt.Println(searchQuery)
-        args := make([]interface{}, len(searchTerms))
-        for idx, val := range searchTerms { args[idx] = val }
-        _, err := dbmap.Select(&blogs, searchQuery, args...)*/
+
         _, err := dbmap.Select(&blogs, searchQuery)
 
         if err == nil {
